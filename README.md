@@ -4,7 +4,7 @@ This project aims to reproduce the results of several model-free RL algorithms i
 
 This projects
 * uses pytorch package
-* implements every algorithm independently in one file
+* implements different algorithms independently in seperate files
 * is written in simplest style
 * tries to follow the original paper and reproduce their results
 

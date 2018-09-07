@@ -18,3 +18,8 @@ My first stage of work is to reproduce this figure in the PPO paper.
 - [x] TRPO (TRPO single path)
 - [x] PPO (PPO clip)
 - [x] Vanilla PG
+
+On the next stage, I want to implement
+
+- [ ] DDPG
+- [ ] Random Search (see [Simple random search provides a competitive approach to reinforcement learning](https://arxiv.org/pdf/1803.07055.pdf))

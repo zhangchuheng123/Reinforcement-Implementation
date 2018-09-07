@@ -23,3 +23,7 @@ On the next stage, I want to implement
 
 - [ ] DDPG
 - [ ] Random Search (see [Simple random search provides a competitive approach to reinforcement learning](https://arxiv.org/pdf/1803.07055.pdf))
+
+Then next stage, discrete action space problem and raw video input (Atari) problems ...
+
+- [ ] DQN and relevant techniques (target network / double Q-learning / prioritized experience replay / dueling network structure)

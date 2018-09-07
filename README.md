@@ -13,8 +13,8 @@ My first stage of work is to reproduce this figure in the PPO paper.
 ![](docs/ppo_experiments.png)
 
 - [x] A2C
-- [ ] ACER (A2C + Trust Region)
+- [x] ACER (A2C + Trust Region): It seems that this implementation has some problems ... (welcom bug report) 
 - [ ] CEM
 - [x] TRPO (TRPO single path)
 - [x] PPO (PPO clip)
-- [ ] Vanilla PG, Adaptive
+- [x] Vanilla PG

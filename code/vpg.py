@@ -40,11 +40,6 @@ EPS = 1e-10
 RESULT_DIR = '../result'
 
 
-Transition = namedtuple('Transition', ('state', 'action', 'action_mean', 'action_logstd', 'mask', 'next_state', 'reward'))
-EPS = 1e-10
-RESULT_DIR = '../result'
-
-
 class args(object):
     env_name = 'Hopper-v2'
     seed = 1234

@@ -297,7 +297,7 @@ def ppo(args):
 
         for i_epoch in range(args.num_epoch):
             # sample from current batch
-            minibatch_ind = np.random.choice(batch_size, args.minibatch_size)
+            minibatch_ind = np.random.choice(batch_size, args.minibatch_size, replace=False)
             minibatch_states = states[minibatch_ind]
             minibatch_actions = actions[minibatch_ind]
             minibatch_oldlogproba = oldlogproba[minibatch_ind]

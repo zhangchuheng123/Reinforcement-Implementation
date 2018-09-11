@@ -14,7 +14,7 @@ My first stage of work is to reproduce this figure in the PPO paper.
 
 - [x] A2C
 - [x] ACER (A2C + Trust Region): It seems that this implementation has some problems ... (welcome bug report) 
-- [ ] CEM
+- [X] CEM
 - [x] TRPO (TRPO single path)
 - [x] PPO (PPO clip)
 - [x] Vanilla PG
@@ -22,8 +22,12 @@ My first stage of work is to reproduce this figure in the PPO paper.
 On the next stage, I want to implement
 
 - [ ] DDPG
-- [ ] Random Search (see [Simple random search provides a competitive approach to reinforcement learning](https://arxiv.org/pdf/1803.07055.pdf))
+- [X] Random Search (see [Simple random search provides a competitive approach to reinforcement learning](https://arxiv.org/pdf/1803.07055.pdf))
 
 Then next stage, discrete action space problem and raw video input (Atari) problems ...
 
 - [ ] DQN and relevant techniques (target network / double Q-learning / prioritized experience replay / dueling network structure)
+
+And then model-based algorithms
+- [ ] PILCO
+- [ ] PE-TS

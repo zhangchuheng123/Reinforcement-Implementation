@@ -23,6 +23,8 @@ On the next stage, I want to implement
 
 - [ ] DDPG
 - [X] Random Search (see [Simple random search provides a competitive approach to reinforcement learning](https://arxiv.org/pdf/1803.07055.pdf))
+- [ ] NPG (natural policy gradient)
+- [ ] SAC (soft actor-critic)
 
 Then next stage, discrete action space problem and raw video input (Atari) problems ...
 
@@ -31,3 +33,6 @@ Then next stage, discrete action space problem and raw video input (Atari) probl
 And then model-based algorithms
 - [ ] PILCO
 - [ ] PE-TS
+
+TODOs:
+- [ ] change the way reward counts, current way may underestimate the reward

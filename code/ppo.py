@@ -2,14 +2,10 @@
 Implementation of PPO
 ref: Schulman, John, et al. "Proximal policy optimization algorithms." arXiv preprint arXiv:1707.06347 (2017).
 ref: https://github.com/Jiankai-Sun/Proximal-Policy-Optimization-in-Pytorch/blob/master/ppo.py
+ref: https://github.com/openai/baselines/tree/master/baselines/ppo2
 
 NOTICE:
     `Tensor2` means 2D-Tensor (num_samples, num_dims) 
-
-NOTE:
-    check the function of running smoothing of states
-    check the function of advantage normalization (- mean / std) in one batch
-    should value network loss be clipped as well ?
 """
 
 import gym
@@ -24,6 +20,7 @@ import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from os.path import join as joindir
+from os import makedirs as mkdir
 import pandas as pd
 import numpy as np
 import argparse
@@ -33,14 +30,15 @@ import math
 
 Transition = namedtuple('Transition', ('state', 'value', 'action', 'logproba', 'mask', 'next_state', 'reward'))
 EPS = 1e-10
-RESULT_DIR = '../result'
+RESULT_DIR = joindir('../result', '.'.join(__file__.split('.')[:-1]))
+mkdir(RESULT_DIR, exist_ok=True)
 
 
 class args(object):
     env_name = 'Hopper-v2'
     seed = 1234
-    num_episode = 100
-    batch_size = 1000
+    num_episode = 2000
+    batch_size = 2048
     max_step_per_round = 2000
     gamma = 0.995
     lamda = 0.97
@@ -49,30 +47,17 @@ class args(object):
     minibatch_size = 256
     clip = 0.2
     loss_coeff_value = 0.5
-    loss_coeff_entropy = 0.1
+    loss_coeff_entropy = 0.01
     lr = 3e-4
     num_parallel_run = 5
+    # tricks
+    schedule_adam = 'linear'
+    schedule_clip = 'linear'
+    layer_norm = True
+    state_norm = True
+    advantage_norm = True
+    lossvalue_norm = True
 
-def add_arguments():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str, default='Hopper-v2')
-    parser.add_argument('--seed', type=int, default=1234)
-    parser.add_argument('--num_episode', type=int, default=1000)
-    parser.add_argument('--batch_size', type=int, default=5000)
-    parser.add_argument('--max_step_per_round', type=int, default=2000)
-    parser.add_argument('--gamma', type=float, default=0.995)
-    parser.add_argument('--lamda', type=float, default=0.97)
-    parser.add_argument('--log_num_episode', type=int, default=1)
-    parser.add_argument('--num_epoch', type=int, default=50)
-    parser.add_argument('--minibatch_size', type=int, default=512)
-    parser.add_argument('--clip', type=float, default=0.2)
-    parser.add_argument('--lr', type=float, default=3e-4)
-    parser.add_argument('--loss_coeff_value', type=float, default=0.5)
-    parser.add_argument('--loss_coeff_entropy', type=float, default=0.1)
-    parser.add_argument('--num_parallel_run', type=int, default=5)
-
-    args = parser.parse_args()
-    return args
 
 class RunningStat(object):
     def __init__(self, shape):
@@ -140,7 +125,7 @@ class ZFilter:
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, num_inputs, num_outputs):
+    def __init__(self, num_inputs, num_outputs, layer_norm=True):
         super(ActorCritic, self).__init__()
         
         self.actor_fc1 = nn.Linear(num_inputs, 64)
@@ -151,6 +136,20 @@ class ActorCritic(nn.Module):
         self.critic_fc1 = nn.Linear(num_inputs, 64)
         self.critic_fc2 = nn.Linear(64, 64)
         self.critic_fc3 = nn.Linear(64, 1)
+
+        if layer_norm:
+            self.layer_norm(self.actor_fc1, std=1.0)
+            self.layer_norm(self.actor_fc2, std=1.0)
+            self.layer_norm(self.actor_fc3, std=0.01)
+
+            self.layer_norm(self.critic_fc1, std=1.0)
+            self.layer_norm(self.critic_fc2, std=1.0)
+            self.layer_norm(self.critic_fc3, std=1.0)
+
+    @staticmethod
+    def layer_norm(layer, std=1.0, bias_const=0.0):
+        torch.nn.init.orthogonal_(layer.weight, std)
+        torch.nn.init.constant_(layer.bias, bias_const)
 
     def forward(self, states):
         """
@@ -227,23 +226,29 @@ def ppo(args):
     env.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    network = ActorCritic(num_inputs, num_actions)
+    network = ActorCritic(num_inputs, num_actions, layer_norm=args.layer_norm)
     optimizer = opt.Adam(network.parameters(), lr=args.lr)
 
-    running_state = ZFilter((num_inputs,), clip=5)
+    running_state = ZFilter((num_inputs,), clip=5.0)
     
     # record average 1-round cumulative reward in every episode
     reward_record = []
     global_steps = 0
+
+    lr_now = args.lr
+    clip_now = args.clip
 
     for i_episode in range(args.num_episode):
         # step1: perform current policy to collect trajectories
         # this is an on-policy method!
         memory = Memory()
         num_steps = 0
+        reward_list = []
+        len_list = []
         while num_steps < args.batch_size:
             state = env.reset()
-            state = running_state(state)
+            if args.state_norm:
+                state = running_state(state)
             reward_sum = 0
             for t in range(args.max_step_per_round):
                 action_mean, action_logstd, value = network(Tensor(state).unsqueeze(0))
@@ -252,7 +257,8 @@ def ppo(args):
                 logproba = logproba.data.numpy()[0]
                 next_state, reward, done, _ = env.step(action)
                 reward_sum += reward
-                next_state = running_state(next_state)
+                if args.state_norm:
+                    next_state = running_state(next_state)
                 mask = 0 if done else 1
 
                 memory.push(state, value, action, logproba, mask, next_state, reward)
@@ -264,7 +270,13 @@ def ppo(args):
                 
             num_steps += (t + 1)
             global_steps += (t + 1)
-            reward_record.append({'steps': global_steps, 'reward': reward_sum})
+            reward_list.append(reward_sum)
+            len_list.append(t + 1)
+        reward_record.append({
+            'episode': i_episode, 
+            'steps': global_steps, 
+            'meanepreward': np.mean(reward_list), 
+            'meaneplen': np.mean(len_list)})
 
         batch = memory.sample()
         batch_size = len(memory)
@@ -293,9 +305,10 @@ def ppo(args):
             prev_return = returns[i]
             prev_value = values[i]
             prev_advantage = advantages[i]
-        advantages = (advantages - advantages.mean()) / (advantages.std() + EPS)
+        if args.advantage_norm:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + EPS)
 
-        for i_epoch in range(args.num_epoch):
+        for i_epoch in range(int(args.num_epoch * batch_size / args.minibatch_size)):
             # sample from current batch
             minibatch_ind = np.random.choice(batch_size, args.minibatch_size, replace=False)
             minibatch_states = states[minibatch_ind]
@@ -304,61 +317,63 @@ def ppo(args):
             minibatch_newlogproba = network.get_logproba(minibatch_states, minibatch_actions)
             minibatch_advantages = advantages[minibatch_ind]
             minibatch_returns = returns[minibatch_ind]
-            minibatch_return_6std = 6 * minibatch_returns.std()
             minibatch_newvalues = network._forward_critic(minibatch_states).flatten()
 
             ratio =  torch.exp(minibatch_newlogproba - minibatch_oldlogproba)
             surr1 = ratio * minibatch_advantages
-            surr2 = ratio.clamp(1 - args.clip, 1 + args.clip) * minibatch_advantages
+            surr2 = ratio.clamp(1 - clip_now, 1 + clip_now) * minibatch_advantages
             loss_surr = - torch.mean(torch.min(surr1, surr2))
 
             # not sure the value loss should be clipped as well 
             # clip example: https://github.com/Jiankai-Sun/Proximal-Policy-Optimization-in-Pytorch/blob/master/ppo.py
             # however, it does not make sense to clip score-like value by a dimensionless clipping parameter
             # moreover, original paper does not mention clipped value 
-            loss_value = torch.mean((minibatch_newvalues - minibatch_returns).pow(2)) / minibatch_return_6std
+            if args.lossvalue_norm:
+                minibatch_return_6std = 6 * minibatch_returns.std()
+                loss_value = torch.mean((minibatch_newvalues - minibatch_returns).pow(2)) / minibatch_return_6std
+            else:
+                loss_value = torch.mean((minibatch_newvalues - minibatch_returns).pow(2))
 
-            loss_entropy = - torch.mean(torch.exp(minibatch_newlogproba) * minibatch_newlogproba)
+            loss_entropy = torch.mean(torch.exp(minibatch_newlogproba) * minibatch_newlogproba)
 
             total_loss = loss_surr + args.loss_coeff_value * loss_value + args.loss_coeff_entropy * loss_entropy
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
 
+        if args.schedule_clip == 'linear':
+            ep_ratio = 1 - (i_episode / args.num_episode)
+            clip_now = args.clip * ep_ratio
+
+        if args.schedule_adam == 'linear':
+            ep_ratio = 1 - (i_episode / args.num_episode)
+            lr_now = args.lr * ep_ratio
+            # set learning rate
+            # ref: https://stackoverflow.com/questions/48324152/
+            for g in optimizer.param_groups:
+                g['lr'] = lr_now
+
         if i_episode % args.log_num_episode == 0:
             print('Finished episode: {} Reward: {:.4f} total_loss = {:.4f} = {:.4f} + {} * {:.4f} + {} * {:.4f}' \
-                .format(i_episode, reward_record[-1]['reward'], total_loss.data, loss_surr.data, args.loss_coeff_value, 
+                .format(i_episode, reward_record[-1]['meanepreward'], total_loss.data, loss_surr.data, args.loss_coeff_value, 
                 loss_value.data, args.loss_coeff_entropy, loss_entropy.data))
             print('-----------------')
 
     return reward_record
-    
-if __name__ == '__main__':
-    datestr = datetime.datetime.now().strftime('%Y-%m-%d')
-    args = add_arguments()
 
-    record_dfs = pd.DataFrame(columns=['steps', 'reward'])
-    reward_cols = []
+def test(args):
+    record_dfs = []
     for i in range(args.num_parallel_run):
         args.seed += 1
         reward_record = pd.DataFrame(ppo(args))
-        record_dfs = record_dfs.merge(reward_record, how='outer', on='steps', suffixes=('', '_{}'.format(i)))
-        reward_cols.append('reward_{}'.format(i))
+        reward_record['#parallel_run'] = i
+        record_dfs.append(reward_record)
+    record_dfs = pd.concat(record_dfs, axis=0)
+    record_dfs.to_csv(joindir(RESULT_DIR, 'ppo-record-{}.csv'.format(args.env_name)))
+    
+if __name__ == '__main__':
 
-    record_dfs = record_dfs.drop(columns='reward').sort_values(by='steps', ascending=True).ffill().bfill()
-    record_dfs['reward_mean'] = record_dfs[reward_cols].mean(axis=1)
-    record_dfs['reward_std'] = record_dfs[reward_cols].std(axis=1)
-    record_dfs['reward_smooth'] = record_dfs['reward_mean'].ewm(span=20).mean()
-    record_dfs.to_csv(joindir(RESULT_DIR, 'ppo-record-{}-{}.csv'.format(args.env_name, datestr)))
+    for env in ['Walker2d-v2', 'Swimmer-v2', 'Hopper-v2', 'Humanoid-v2', 'HalfCheetah-v2', 'Reacher-v2']:
+        args.env_name = env
+        test(args)
 
-    # Plot
-    plt.figure(figsize=(12, 6))
-    plt.plot(record_dfs['steps'], record_dfs['reward_mean'], label='trajory reward')
-    plt.plot(record_dfs['steps'], record_dfs['reward_smooth'], label='smoothed reward')
-    plt.fill_between(record_dfs['steps'], record_dfs['reward_mean'] - record_dfs['reward_std'], 
-        record_dfs['reward_mean'] + record_dfs['reward_std'], color='b', alpha=0.2)
-    plt.legend()
-    plt.xlabel('steps of env interaction (sample complexity)')
-    plt.ylabel('average reward')
-    plt.title('PPO on {}'.format(args.env_name))
-    plt.savefig(joindir(RESULT_DIR, 'ppo-{}-{}.pdf'.format(args.env_name, datestr)))

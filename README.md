@@ -36,3 +36,7 @@ And then model-based algorithms
 
 TODOs:
 - [ ] change the way reward counts, current way may underestimate the reward
+
+## PPO Implementation
+
+PPO implementation is of high quality - matches the performance of openai.baselines. 

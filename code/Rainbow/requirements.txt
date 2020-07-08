@@ -1,0 +1,10 @@
+atari-py==0.2.6
+opencv-python==4.2.0.34
+plotly==4.8.1
+procgen==0.10.3
+tensorboardX==2.0
+torch==1.5.1
+tqdm==4.42.1
+tensorflow<2.0.0,>=1.4.0
+numpy<2.0.0,>=1.17.0
+pathos==0.2.6

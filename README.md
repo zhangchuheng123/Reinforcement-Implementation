@@ -4,7 +4,7 @@ This project aims to reproduce the results of several model-free RL algorithms i
 
 This projects
 * uses pytorch package
-* implements different algorithms independently in seperate files
+* implements different algorithms independently in seperate files / minimal files
 * is written in simplest style
 * tries to follow the original paper and reproduce their results
 
@@ -26,16 +26,21 @@ On the next stage, I want to implement
 - [ ] NPG (natural policy gradient)
 - [ ] SAC (soft actor-critic)
 
-Then next stage, discrete action space problem and raw video input (Atari) problems ...
+Then next stage, discrete action space problem and raw video input (Atari) problems:
 
-- [ ] DQN and relevant techniques (target network / double Q-learning / prioritized experience replay / dueling network structure)
+- [X] Rainbow: DQN and relevant techniques (target network / double Q-learning / prioritized experience replay / dueling network structure / distributional RL)
 
-And then model-based algorithms
+Rainbow on Atari with only 3M: It works but may need further tuning.
+
+![](docs/ppo_experiments.png)
+
+And then model-based algorithms (not planned)
+
 - [ ] PILCO
 - [ ] PE-TS
 
 TODOs:
-- [ ] change the way reward counts, current way may underestimate the reward
+- [ ] change the way reward counts, current way may underestimate the reward (evaluate a deterministic model rather a stochastic/exploratory model)
 
 ## PPO Implementation
 

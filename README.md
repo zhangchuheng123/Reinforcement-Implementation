@@ -25,6 +25,7 @@ On the next stage, I want to implement
 - [X] Random Search (see [Simple random search provides a competitive approach to reinforcement learning](https://arxiv.org/pdf/1803.07055.pdf))
 - [ ] NPG (natural policy gradient)
 - [ ] SAC (soft actor-critic)
+- [X] DQN 
 
 Then next stage, discrete action space problem and raw video input (Atari) problems:
 
@@ -45,3 +46,7 @@ TODOs:
 ## PPO Implementation
 
 PPO implementation is of high quality - matches the performance of openai.baselines. 
+
+## Update
+
+Recently, I added Rainbow and DQN. The Rainbow implementation is of high quality on Atari games - enough for you to modify and write your own research paper. The DQN implementation is a minimum workaround and reaches a good performance on MountainCar (which is a simple task but many codes on Github do not achieve good performance or need additional reward/environment engineering). This is enough for you to have a fast test of your research ideas.

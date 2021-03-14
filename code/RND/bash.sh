@@ -1,0 +1,1 @@
+python train.py --use-gae --use-gpu --sticky-action --env-id MontezumaRevengeNoFrameskip-v4 --ext-coef 0.0

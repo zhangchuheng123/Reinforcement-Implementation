@@ -23,13 +23,13 @@ On the next stage, I want to implement
 
 - [ ] DDPG
 - [X] Random Search (see [Simple random search provides a competitive approach to reinforcement learning](https://arxiv.org/pdf/1803.07055.pdf))
-- [ ] NPG (natural policy gradient)
 - [ ] SAC (soft actor-critic)
 - [X] DQN 
 
 Then next stage, discrete action space problem and raw video input (Atari) problems:
 
 - [X] Rainbow: DQN and relevant techniques (target network / double Q-learning / prioritized experience replay / dueling network structure / distributional RL)
+- [X] PPO with random network distillation (RND)
 
 Rainbow on Atari with only 3M: It works but may need further tuning.
 

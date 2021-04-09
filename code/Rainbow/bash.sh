@@ -1,0 +1,1 @@
+python main.py --id baseline --game pong --architecture canonical --disable-cuda

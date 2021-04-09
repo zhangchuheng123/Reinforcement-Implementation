@@ -57,46 +57,6 @@ class DQN(nn.Module):
                                        nn.Conv2d(32, 64, 4, stride=2, padding=0), nn.ReLU(),
                                        nn.Conv2d(64, 64, 3, stride=1, padding=0), nn.ReLU())
             self.conv_output_size = 3136
-        elif args.architecture == 'depth_1':
-            self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 8, stride=4, padding=0))
-            self.conv_output_size = 12800
-        elif args.architecture == 'depth_2':
-            self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 8, stride=4, padding=0), nn.ReLU(),
-                                       nn.Conv2d(32, 64, 4, stride=2, padding=0), nn.ReLU())
-            self.conv_output_size = 5184
-        elif args.architecture == 'depth_3':
-            self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 8, stride=4, padding=0), nn.ReLU(),
-                                       nn.Conv2d(32, 64, 4, stride=2, padding=0), nn.ReLU(),
-                                       nn.Conv2d(64, 64, 3, stride=1, padding=0), nn.ReLU(),
-                                       nn.Conv2d(64, 64, 2, stride=1, padding=0), nn.ReLU())
-            self.conv_output_size = 2304
-        elif args.architecture == 'depth_4':
-            self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 8, stride=4, padding=0), nn.ReLU(),
-                                       nn.Conv2d(32, 64, 4, stride=2, padding=0), nn.ReLU(),
-                                       nn.Conv2d(64, 64, 3, stride=1, padding=0), nn.ReLU(),
-                                       nn.Conv2d(64, 64, 2, stride=1, padding=0), nn.ReLU(),
-                                       nn.Conv2d(64, 64, 2, stride=1, padding=0), nn.ReLU())
-            self.conv_output_size = 1600
-        elif args.architecture == 'width_1':
-            self.convs = nn.Sequential(nn.Conv2d(args.history_length, 8, 8, stride=4, padding=0), nn.ReLU(),
-                                       nn.Conv2d(8, 16, 4, stride=2, padding=0), nn.ReLU(),
-                                       nn.Conv2d(16, 16, 3, stride=1, padding=0), nn.ReLU())
-            self.conv_output_size = 784
-        elif args.architecture == 'width_2':
-            self.convs = nn.Sequential(nn.Conv2d(args.history_length, 16, 8, stride=4, padding=0), nn.ReLU(),
-                                       nn.Conv2d(16, 32, 4, stride=2, padding=0), nn.ReLU(),
-                                       nn.Conv2d(32, 32, 3, stride=1, padding=0), nn.ReLU())
-            self.conv_output_size = 1568
-        elif args.architecture == 'width_3':
-            self.convs = nn.Sequential(nn.Conv2d(args.history_length, 64, 8, stride=4, padding=0), nn.ReLU(),
-                                       nn.Conv2d(64, 128, 4, stride=2, padding=0), nn.ReLU(),
-                                       nn.Conv2d(128, 128, 3, stride=1, padding=0), nn.ReLU())
-            self.conv_output_size = 6272
-        elif args.architecture == 'width_4':
-            self.convs = nn.Sequential(nn.Conv2d(args.history_length, 128, 8, stride=4, padding=0), nn.ReLU(),
-                                       nn.Conv2d(128, 256, 4, stride=2, padding=0), nn.ReLU(),
-                                       nn.Conv2d(256, 256, 3, stride=1, padding=0), nn.ReLU())
-            self.conv_output_size = 12544
         elif args.architecture == 'data-efficient':
             self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 5, stride=5, padding=0), nn.ReLU(),
                                        nn.Conv2d(32, 64, 5, stride=5, padding=0), nn.ReLU())

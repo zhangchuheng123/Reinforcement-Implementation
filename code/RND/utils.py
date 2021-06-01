@@ -3,12 +3,7 @@ import torch
 from torch._six import inf
 
 
-use_gae = True
-lam = 0.95
-train_method = 'RND'
-
-
-def make_train_data(reward, done, value, gamma, num_step, num_worker):
+def make_train_data(reward, done, value, gamma, num_step, num_worker, lam=0.95, use_gae=True):
     discounted_return = np.empty([num_worker, num_step])
 
     # Discounted Return

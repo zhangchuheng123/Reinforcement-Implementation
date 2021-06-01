@@ -1,15 +1,19 @@
-from agents import *
-from envs import *
-from utils import *
+from agents import RNDAgent
+from envs import AtariEnvironment
+from utils import make_train_data, RunningMeanStd, RewardForwardFilter, softmax
 
 import torch
 from torch.multiprocessing import Pipe
+
 from tensorboardX import SummaryWriter
 from datetime import datetime
 import numpy as np
 import argparse
+import tqdm
+import gym
 import os
 
+# Enable multi-thread
 os.system("taskset -p 0xffffffff %d" % os.getpid())
 torch.set_num_threads(128)
 
@@ -21,9 +25,10 @@ def parse_arguments():
     parser.add_argument('--env-type', type=str, default='atari')
     parser.add_argument('--env-id', type=str, default='MontezumaRevengeNoFrameskip-v4')
     parser.add_argument('--max-step-per-episode', type=int, default=4500)
+    parser.add_argument('--total-frames', type=int, default=int(50e6))
     parser.add_argument('--ext-coef', type=float, default=2.0)
     parser.add_argument('--learning-rate', type=float, default=1e-4)
-    parser.add_argument('--num-env', type=int, default=128)
+    parser.add_argument('--num-worker', type=int, default=128)
     parser.add_argument('--num-step', type=int, default=128)
     parser.add_argument('--gamma', type=float, default=0.999)
     parser.add_argument('--int-gamma', type=float, default=0.99)
@@ -47,6 +52,7 @@ def parse_arguments():
     parser.add_argument('--update-proportion', type=float, default=0.25)
     parser.add_argument('--life-done', action='store_true')
     parser.add_argument('--obs-norm-step', type=int, default=50)
+    parser.add_argument('--save-models', action='store_true')
 
     # Setup
     args = parser.parse_args()
@@ -73,13 +79,11 @@ def main():
 
     if env_type == 'atari':
         env = gym.make(env_id)
+        input_size = env.observation_space.shape 
+        output_size = env.action_space.n 
+        env.close()
     else:
         raise NotImplementedError
-
-    input_size = env.observation_space.shape  # 4
-    output_size = env.action_space.n  # 2
-
-    env.close()
 
     is_load_model = False
     is_render = False
@@ -97,7 +101,7 @@ def main():
     use_gae = args.use_gae
     use_noisy_net = args.use_noisynet
     lam = args.lam
-    num_worker = args.num_env
+    num_worker = args.num_worker
     num_step = args.num_step
     ppo_eps = args.ppo_eps
     epoch = args.epoch
@@ -119,7 +123,10 @@ def main():
     obs_rms = RunningMeanStd(shape=(1, 1, 84, 84))
     discounted_reward = RewardForwardFilter(int_gamma)
 
-    agent = RNDAgent
+    if args.train_method == 'RND':
+        agent = RNDAgent
+    else:
+        raise NotImplementedError
 
     if args.env_type == 'atari':
         env_type = AtariEnvironment
@@ -151,7 +158,8 @@ def main():
     for idx in range(num_worker):
         parent_conn, child_conn = Pipe()
         work = env_type(env_id, is_render, idx, child_conn, 
-            sticky_action=sticky_action, p=action_prob, life_done=life_done)
+            sticky_action=sticky_action, p=action_prob, life_done=life_done, 
+            max_step_per_episode=args.max_step_per_episode)
         work.start()
         works.append(work)
         parent_conns.append(parent_conn)
@@ -177,7 +185,7 @@ def main():
             parent_conn.send(action)
 
         for parent_conn in parent_conns:
-            s, r, d, rd, lr, nr = parent_conn.recv()
+            s, r, d, rd, lr = parent_conn.recv()
             next_obs.append(s[3, :, :].reshape([1, 84, 84]))
 
         if len(next_obs) % (num_step * num_worker) == 0:
@@ -186,14 +194,13 @@ def main():
             next_obs = []
     logger.info('End to initalize...')
 
+    pbar = tqdm.tqdm(total=args.total_frames)
     while True:
         logger.info('Iteration: {}'.format(global_update))
-        #####################################################################################################
         total_state, total_reward, total_done, total_next_state, \
             total_action, total_int_reward, total_next_obs, total_ext_values, \
-            total_int_values, total_policy, total_policy_np, total_num_rooms = \
-            [], [], [], [], [], [], [], [], [], [], [], []
-        #####################################################################################################
+            total_int_values, total_policy, total_policy_np = \
+            [], [], [], [], [], [], [], [], [], [], []
         global_step += (num_worker * num_step)
         global_update += 1
 
@@ -204,20 +211,15 @@ def main():
             for parent_conn, action in zip(parent_conns, actions):
                 parent_conn.send(action)
 
-            #################################################################################################
-            next_states, rewards, dones, real_dones, log_rewards, next_obs, num_rooms = \
-                [], [], [], [], [], [], []
-            #################################################################################################
+            next_states, rewards, dones, real_dones, log_rewards, next_obs = \
+                [], [], [], [], [], []
             for parent_conn in parent_conns:
-                s, r, d, rd, lr, nr = parent_conn.recv()
+                s, r, d, rd, lr = parent_conn.recv()
                 next_states.append(s)
                 rewards.append(r)
                 dones.append(d)
                 real_dones.append(rd)
                 log_rewards.append(lr)
-                #############################################################################################
-                num_rooms.append(nr)
-                #############################################################################################
                 next_obs.append(s[3, :, :].reshape([1, 84, 84]))
 
             next_states = np.stack(next_states)
@@ -225,9 +227,6 @@ def main():
             dones = np.hstack(dones)
             real_dones = np.hstack(real_dones)
             next_obs = np.stack(next_obs)
-            #################################################################################################
-            num_rooms = np.hstack(num_rooms)
-            #################################################################################################
 
             # total reward = int reward + ext Reward
             intrinsic_reward = agent.compute_intrinsic_reward(
@@ -245,9 +244,6 @@ def main():
             total_int_values.append(value_int)
             total_policy.append(policy)
             total_policy_np.append(policy.cpu().numpy())
-            #####################################################################################################
-            total_num_rooms.append(num_rooms)
-            #####################################################################################################
 
             states = next_states[:, :, :, :]
 
@@ -269,7 +265,6 @@ def main():
         _, value_ext, value_int, _ = agent.get_action(np.float32(states) / 255.)
         total_ext_values.append(value_ext)
         total_int_values.append(value_int)
-        # --------------------------------------------------
 
         total_state = np.stack(total_state).transpose([1, 0, 2, 3, 4]).reshape([-1, 4, 84, 84])
         total_reward = np.stack(total_reward).transpose().clip(-1, 1)
@@ -279,14 +274,6 @@ def main():
         total_ext_values = np.stack(total_ext_values).transpose()
         total_int_values = np.stack(total_int_values).transpose()
         total_logging_policy = np.vstack(total_policy_np)
-        #####################################################################################################
-        total_num_rooms = np.stack(total_num_rooms).transpose().reshape(-1)
-        total_done_cal = total_done.reshape(-1)
-        if np.any(total_done_cal):
-            avg_num_rooms = np.mean(total_num_rooms[total_done_cal])
-        else:
-            avg_num_rooms = 0
-        #####################################################################################################
         
         # Step 2. calculate intrinsic reward
         # running mean intrinsic reward
@@ -300,11 +287,6 @@ def main():
         total_int_reward /= np.sqrt(reward_rms.var)
         writer.add_scalar('data/int_reward_per_epi', np.sum(total_int_reward) / num_worker, sample_episode)
         writer.add_scalar('data/int_reward_per_rollout', np.sum(total_int_reward) / num_worker, global_update)
-        #####################################################################################################
-        writer.add_scalar('data/avg_num_rooms_per_iteration', avg_num_rooms, global_update)
-        writer.add_scalar('data/avg_num_rooms_per_step', avg_num_rooms, global_step)
-        #####################################################################################################
-        # -------------------------------------------------------------------------------------------
 
         # logging Max action probability
         writer.add_scalar('data/max_prob', softmax(total_logging_policy).max(1).mean(), sample_episode)
@@ -321,23 +303,27 @@ def main():
 
         # add ext adv and int adv
         total_adv = int_adv * int_coef + ext_adv * ext_coef
-        # -----------------------------------------------
 
         # Step 4. update obs normalize param
         obs_rms.update(total_next_obs)
-        # -----------------------------------------------
 
         # Step 5. Training!
         agent.train_model(np.float32(total_state) / 255., ext_target, int_target, total_action,
                           total_adv, ((total_next_obs - obs_rms.mean) / np.sqrt(obs_rms.var)).clip(-5, 5),
                           total_policy)
 
-        if global_update % 1000 == 0:
+        if args.save_models and global_update % 1000 == 0:
             torch.save(agent.model.state_dict(), 'models/{}-{}.model'.format(env_id, global_update))
             logger.info('Now Global Step :{}'.format(global_step))
             torch.save(agent.model.state_dict(), model_path)
             torch.save(agent.rnd.predictor.state_dict(), predictor_path)
             torch.save(agent.rnd.target.state_dict(), target_path)
+
+        pbar.update(num_worker * num_step)
+        if global_step >= args.total_frames:
+            break
+
+    pbar.close()
 
 if __name__ == '__main__':
     main()

@@ -4,13 +4,8 @@ import numpy as np
 from abc import abstractmethod
 from collections import deque
 from copy import copy
-from torch.multiprocessing import Pipe, Process
-from model import *
+from torch.multiprocessing import Process
 from PIL import Image
-
-train_method = 'RND'
-max_step_per_episode = 4500
-
 
 class Environment(Process):
     @abstractmethod
@@ -75,33 +70,6 @@ class MaxAndSkipEnv(gym.Wrapper):
         return self.env.reset(**kwargs)
 
 
-class MontezumaInfoWrapper(gym.Wrapper):
-    def __init__(self, env, room_address):
-        super(MontezumaInfoWrapper, self).__init__(env)
-        self.room_address = room_address
-        self.visited_rooms = set()
-
-    def get_current_room(self):
-        ram = unwrap(self.env).ale.getRAM()
-        assert len(ram) == 128
-        return int(ram[self.room_address])
-
-    def step(self, action):
-        obs, rew, done, info = self.env.step(action)
-        self.visited_rooms.add(self.get_current_room())
-
-        if 'episode' not in info:
-            info['episode'] = {}
-        info['episode'].update(visited_rooms=copy(self.visited_rooms))
-
-        if done:
-            self.visited_rooms.clear()
-        return obs, rew, done, info
-
-    def reset(self):
-        return self.env.reset()
-
-
 class AtariEnvironment(Environment):
     def __init__(
             self,
@@ -114,12 +82,11 @@ class AtariEnvironment(Environment):
             w=84,
             life_done=True,
             sticky_action=True,
-            p=0.25):
+            p=0.25,
+            max_step_per_episode=4500):
         super(AtariEnvironment, self).__init__()
         self.daemon = True
         self.env = MaxAndSkipEnv(gym.make(env_id), is_render)
-        if 'Montezuma' in env_id:
-            self.env = MontezumaInfoWrapper(self.env, room_address=3 if 'Montezuma' in env_id else 1)
         self.env_id = env_id
         self.is_render = is_render
         self.env_idx = env_idx
@@ -128,6 +95,7 @@ class AtariEnvironment(Environment):
         self.rall = 0
         self.recent_rlist = deque(maxlen=100)
         self.child_conn = child_conn
+        self.max_step_per_episode = max_step_per_episode
 
         self.sticky_action = sticky_action
         self.last_action = 0
@@ -156,7 +124,7 @@ class AtariEnvironment(Environment):
 
             s, reward, done, info = self.env.step(action)
 
-            if max_step_per_episode < self.steps:
+            if self.steps > self.max_step_per_episode:
                 done = True
 
             log_reward = reward
@@ -170,19 +138,15 @@ class AtariEnvironment(Environment):
 
             if done:
                 self.recent_rlist.append(self.rall)
-                print("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}  Visited Room: [{}]".format(
-                    self.episode, self.env_idx, self.steps, self.rall, np.mean(self.recent_rlist),
-                    info.get('episode', {}).get('visited_rooms', {})))
-                num_rooms = len(info.get('episode', {}).get('visited_rooms', {}))
+                # print("[Episode {}({})] Step: {}  Reward: {}  Recent Reward: {}".format(
+                #     self.episode, self.env_idx, self.steps, self.rall, np.mean(self.recent_rlist)))
                 self.history = self.reset()
-            else:
-                num_rooms = 0
                 
             # if self.env_idx == 0:
             #     print('env_idx=0 num_rooms={} done={}'.format(num_rooms, done))
 
             self.child_conn.send(
-                [self.history[:, :, :], reward, force_done, done, log_reward, num_rooms])
+                [self.history[:, :, :], reward, force_done, done, log_reward])
 
     def reset(self):
         self.last_action = 0

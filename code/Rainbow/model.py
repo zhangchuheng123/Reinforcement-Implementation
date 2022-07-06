@@ -67,6 +67,11 @@ class DQN(nn.Module):
         self.fc_z_v = NoisyLinear(args.hidden_size, self.atoms, std_init=args.noisy_std)
         self.fc_z_a = NoisyLinear(args.hidden_size, action_space * self.atoms, std_init=args.noisy_std)
 
+    def representation(self, x):
+        x = self.convs(x)
+        x = x.view(-1, self.conv_output_size)
+        return x
+
     def forward(self, x, log=False):
         x = self.convs(x)
         x = x.view(-1, self.conv_output_size)

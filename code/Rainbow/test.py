@@ -27,7 +27,7 @@ def test(args, T, agent, val_mem, metrics, results_dir, evaluate=False, plot=Fal
                 state, reward_traj, reward_sum, state_traj, done = env.reset(), [], 0, [], False
 
             state_traj.append(state)
-            action = agent.act_eval(state)  # Choose an action ε-greedily
+            action = agent.act(state)  # Choose an action greedily (possibly with noisy net)
             state, reward, done = env.step(action)  # Step
             reward_traj.append(reward)
             reward_sum += reward
@@ -41,12 +41,8 @@ def test(args, T, agent, val_mem, metrics, results_dir, evaluate=False, plot=Fal
                 t_Qs, t_Qstds = [], []
                 for state in state_traj:
                     res = agent.evaluate_q(state)
-                    if args.my_loss == 'MIMO':
-                        t_Qs.append(res[0])
-                        t_Qstds.append(res[1])
-                    else:
-                        t_Qs.append(res)
-                        t_Qstds.append(0)
+                    t_Qs.append(res)
+                    t_Qstds.append(0)
                 Q_trajs = np.append(Q_trajs, np.array(t_Qs))
                 Qstd_trajs = np.append(Qstd_trajs, np.array(t_Qstds))
                 break
@@ -55,12 +51,8 @@ def test(args, T, agent, val_mem, metrics, results_dir, evaluate=False, plot=Fal
     # Test Q-values over validation memory
     for state in val_mem:  # Iterate over valid states
         res = agent.evaluate_q(state)
-        if args.my_loss == 'MIMO':
-            T_Qs.append(res[0])
-            T_Qstds.append(res[1])
-        else:
-            T_Qs.append(res)
-            T_Qstds.append(0)
+        T_Qs.append(res)
+        T_Qstds.append(0)
 
     avg_reward = sum(T_rewards) / len(T_rewards)
     avg_Q = sum(T_Qs) / len(T_Qs)

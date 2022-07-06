@@ -57,7 +57,7 @@ def parse_arguments():
     parser.add_argument('--evaluation-size', type=int, default=500, metavar='N', help='Number of transitions to use for validating Q')
     parser.add_argument('--render', action='store_true', help='Display screen (testing only)')
     parser.add_argument('--enable-cudnn', action='store_true', help='Enable cuDNN (faster but nondeterministic)')
-    parser.add_argument('--checkpoint-interval', default=0, help='How often to checkpoint the model, defaults to 0 (never checkpoint)')
+    parser.add_argument('--checkpoint-interval', default=int(20e3), help='How often to checkpoint the model, defaults to 0 (never checkpoint)')
     parser.add_argument('--memory', help='Path to save/load the memory from')
     parser.add_argument('--disable-bzip-memory', action='store_true', help='Don\'t zip the memory file. Not recommended (zipping is a bit slower and much, much smaller)')
     parser.add_argument('--tensorboard-dir', type=str, default=None, help='tensorboard directory')
@@ -100,7 +100,7 @@ def main():
     os.makedirs(results_dir, exist_ok=True)
     logger = Logger(results_dir)
 
-    metrics = {'steps': [], 'rewards': [], 'Qs': [], 'best_avg_reward': -float('inf')}
+    metrics = {'steps': [], 'rewards': [], 'Qs': [], 'Qstds': [], 'best_avg_reward': -float('inf')}
     np.random.seed(args.seed)
     torch.manual_seed(np.random.randint(1, 10000))
     if torch.cuda.is_available() and not args.disable_cuda:
@@ -151,8 +151,9 @@ def main():
 
     if args.evaluate:
         dqn.eval()  # Set DQN (online network) to evaluation mode
-        avg_reward, avg_Q = test(args, 0, dqn, val_mem, metrics, results_dir, evaluate=True)  # Test
-        logger.info('Avg. reward: ' + str(avg_reward) + ' | Avg. Q: ' + str(avg_Q))
+        test_result = test(args, 0, dqn, val_mem, metrics, results_dir, evaluate=True)  # Test
+        logger.info('Avg. reward: ' + str(test_result['avg_reward']) \
+            + ' | Avg. Q: ' + str(test_result['avg_Q']))
     else:
         # Training loop
         dqn.train()
@@ -183,10 +184,12 @@ def main():
 
                 if T % args.evaluation_interval == 0:
                     dqn.eval()  # Set DQN (online network) to evaluation mode
-                    avg_reward, avg_Q = test(args, T, dqn, val_mem, metrics, results_dir)  # Test
-                    writer.add_scalar('Eval/Reward', avg_reward, T)
-                    writer.add_scalar('Eval/Q', avg_Q, T)
-                    logger.info('T = ' + str(T) + ' / ' + str(args.T_max) + ' | Avg. reward: ' + str(avg_reward) + ' | Avg. Q: ' + str(avg_Q))
+                    test_result = test(args, T, dqn, val_mem, metrics, results_dir)  # Test
+                    for k, v in test_result.items():
+                        writer.add_scalar('Eval/{}'.format(k), v, T)
+                    logger.info('T = ' + str(T) + ' / ' + str(args.T_max) + \
+                        ' | Avg. reward: ' + str(test_result['avg_reward']) + \
+                        ' | Avg. Q: ' + str(test_result['avg_Q']))
                     dqn.train()  # Set DQN (online network) back to training mode
 
                     # If memory path provided, save it
@@ -198,7 +201,7 @@ def main():
                     dqn.update_target_net()
 
                 # Checkpoint the network
-                if (args.checkpoint_interval != 0) and (T % args.checkpoint_interval == 0):
+                if T % args.checkpoint_interval == 0:
                     dqn.save(results_dir, 'checkpoint.pth')
 
             state = next_state

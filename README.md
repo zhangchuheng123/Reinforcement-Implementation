@@ -23,7 +23,8 @@ On the next stage, I want to implement
 
 - [ ] DDPG
 - [X] Random Search (see [Simple random search provides a competitive approach to reinforcement learning](https://arxiv.org/pdf/1803.07055.pdf))
-- [ ] SAC (soft actor-critic)
+- [ ] SAC (soft actor-critic) with continuous action space
+- [X] SAC (soft actor-critic) with discrete action space
 - [X] DQN 
 
 Then next stage, discrete action space problem and raw video input (Atari) problems:

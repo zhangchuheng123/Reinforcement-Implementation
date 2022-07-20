@@ -1,0 +1,128 @@
+import torch
+import torch.nn as nn
+from torch import Tensor
+import torch.optim as opt
+from torch.optim import Adam
+from torch.autograd import Variable
+from torch.nn import functional as F
+from torch.distributions import Categorical
+from torch.utils.tensorboard import SummaryWriter
+
+from multiprocessing.pool import ThreadPool as Pool
+import numpy as np
+import argparse
+
+
+def update_params(optim, loss, retain_graph=False):
+    optim.zero_grad()
+    loss.backward(retain_graph=retain_graph)
+    optim.step()
+
+def disable_gradients(network):
+    # Disable calculations of gradients.
+    for param in network.parameters():
+        param.requires_grad = False
+
+def initialize_weights_he(m):
+    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
+        torch.nn.init.kaiming_uniform_(m.weight)
+        if m.bias is not None:
+            torch.nn.init.constant_(m.bias, 0)
+
+
+class Struct:
+    def __init__(self, **entries): 
+        self.__dict__.update(entries)
+
+
+class RunningMeanStats(object):
+    """
+    An inefficient estimator for calculating the mean scaler over a given horizon
+    """
+    def __init__(self, n=10):
+        self.n = n
+        self.stats = deque(maxlen=n)
+
+    def append(self, x):
+        self.stats.append(x)
+
+    def get(self):
+        return np.mean(self.stats)
+
+
+class Flatten(nn.Module):
+    def forward(self, x):
+        return x.view(x.size(0), -1)
+
+
+class RunningStat(object):
+    def __init__(self):
+        self._n = 0
+        self._M = 0
+        self._S = 0
+
+    def push(self, x):
+        self._n += 1
+        if self._n == 1:
+            self._M = x
+        else:
+            oldM = self._M.copy()
+            self._M = oldM + (x - oldM) / self._n
+            self._S = self._S + (x - oldM) * (x - self._M)
+
+    @property
+    def n(self):
+        return self._n
+
+    @property
+    def mean(self):
+        return self._M
+
+    @property
+    def var(self):
+        return self._S / (self._n - 1) if self._n > 1 else np.square(self._M)
+
+    @property
+    def std(self):
+        return np.sqrt(self.var)
+
+    @property
+    def shape(self):
+        return self._M.shape
+
+
+class ZFilter(object):
+    """
+    y = (x-mean)/std
+    using running estimates of mean, std
+    """
+    def __init__(self, demean=True, destd=True, clip=10.0):
+        self.demean = demean
+        self.destd = destd
+        self.clip = clip
+
+        self.rs = RunningStat()
+
+    def __call__(self, x, update=True):
+        if update: self.rs.push(x)
+        if self.demean:
+            x = x - self.rs.mean
+        if self.destd:
+            x = x / (self.rs.std + 1e-8)
+        if self.clip:
+            x = np.clip(x, -self.clip, self.clip)
+        return x
+
+
+class Memory(object):
+    def __init__(self):
+        self.memory = []
+
+    def push(self, *args):
+        self.memory.append(Transition(*args))
+
+    def sample(self):
+        return Transition(*zip(*self.memory))
+
+    def __len__(self):
+        return len(self.memory)

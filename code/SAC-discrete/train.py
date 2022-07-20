@@ -40,9 +40,8 @@ import math
 import pdb
 
 from utils import update_params, disable_gradients, initialize_weights_he
-from utils import Flatten, RunningMeanStats, ZFilter
-from env import VectorEnv, OkexEnvEnvironment
-from env import make_env
+from utils import Flatten, RunningMeanStats, ZFilter, NDStandardScaler
+from env import make_env, VectorEnv
 from memory import LazyMultiStepMemory, LazyPrioritizedMultiStepMemory
 
 
@@ -76,7 +75,7 @@ class MLPBase(BaseNetwork):
 
 class CNNBase(BaseNetwork):
 
-    def __init__(self, num_channels):
+    def __init__(self, num_channels, hidden=32):
 
         super(CNNBase, self).__init__()
 
@@ -88,6 +87,7 @@ class CNNBase(BaseNetwork):
             nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
             nn.ReLU(),
             Flatten(),
+            nn.Linear(3136, hidden)
         ).apply(initialize_weights_he)
 
     def forward(self, states):
@@ -104,7 +104,7 @@ class QNetwork(BaseNetwork):
         if encoder == 'MLP':
             self.encoder = MLPBase(num_channels, hidden)
         elif encoder == 'CNN':
-            self.encoder = CNNBase(num_channels)
+            self.encoder = CNNBase(num_channels, hidden)
 
         if not use_dueling:
             self.head = nn.Sequential(
@@ -138,12 +138,14 @@ class QNetwork(BaseNetwork):
 class TwinnedQNetwork(BaseNetwork):
 
     def __init__(self, num_channels, num_actions,
-                 use_dueling=False, hidden=32):
+                 use_dueling=False, hidden=32, encoder='CNN'):
 
         super(TwinnedQNetwork, self).__init__()
 
-        self.Q1 = QNetwork(num_channels, num_actions, use_dueling, hidden)
-        self.Q2 = QNetwork(num_channels, num_actions, use_dueling, hidden)
+        self.Q1 = QNetwork(num_channels, num_actions, 
+            use_dueling, hidden, encoder)
+        self.Q2 = QNetwork(num_channels, num_actions, 
+            use_dueling, hidden, encoder)
 
     def forward(self, states):
 
@@ -163,7 +165,7 @@ class CategoricalPolicy(BaseNetwork):
         if encoder == 'MLP':
             self.encoder = MLPBase(num_channels, hidden)
         elif encoder == 'CNN':
-            self.encoder = CNNBase(num_channels)
+            self.encoder = CNNBase(num_channels, hidden)
 
         self.head = nn.Sequential(
             nn.Linear(hidden, hidden),
@@ -222,12 +224,31 @@ class BaseAgent(ABC):
         os.makedirs(self.summary_dir, exist_ok=True)
         os.makedirs(self.record_dir, exist_ok=True)
 
+        # Constants
+        self.steps = 0
+        self.learning_steps = 0
+        self.episodes = 0
+        self.best_eval_score = -np.inf
+        self.num_steps = self.config.algo.num_steps
+        self.batch_size = self.config.algo.batch_size
+        self.gamma_n = self.config.algo.gamma ** self.config.algo.multi_step
+        self.start_steps = self.config.algo.start_steps
+        self.update_interval = self.config.algo.update_interval
+        self.target_update_interval = self.config.algo.target_update_interval
+        self.use_per = self.config.algo.use_per
+        self.evaluate_steps = self.config.algo.evaluate_steps
+        self.log_interval = self.config.algo.log_interval
+        self.eval_interval = self.config.algo.eval_interval
+        self.num_parallel_envs = self.config.env.num_parallel_envs
+        self.target_entropy_ratio = self.config.algo.target_entropy_ratio
+        self.verbose = self.config.basic.verbose
+
         # Create environments
-        if self.config.algo.num_parallel_envs == 1:
-            self.env_train = make_env(config.env.name, clip_rewards=False)
+        if self.num_parallel_envs == 1:
+            self.env_train = make_env(self.config.env.name, clip_rewards=False)
         else:
             raise NotImplementedError
-        self.env_valid = make_env(config.env.name, clip_rewards=False,
+        self.env_valid = make_env(self.config.env.name, clip_rewards=False,
             episode_life=False)
 
         if torch.cuda.is_available():
@@ -243,7 +264,7 @@ class BaseAgent(ABC):
                 capacity=self.config.algo.memory_size,
                 state_shape=self.env_train.observation_space.shape,
                 device=self.device, 
-                gamma=self.config.env.gamma, 
+                gamma=self.config.algo.gamma, 
                 state_dtype=self.config.env.state_dtype,
                 multi_step=self.config.algo.multi_step,
                 beta_steps=beta_steps)
@@ -252,29 +273,11 @@ class BaseAgent(ABC):
                 capacity=self.config.algo.memory_size,
                 state_shape=self.env_train.observation_space.shape,
                 device=self.device, 
-                gamma=self.config.env.gamma, 
+                gamma=self.config.algo.gamma, 
                 state_dtype=self.config.env.state_dtype,
                 multi_step=self.config.algo.multi_step)
 
         self.writer = SummaryWriter(log_dir=self.summary_dir)
-
-        self.steps = 0
-        self.learning_steps = 0
-        self.episodes = 0
-        self.best_eval_score = -np.inf
-        self.num_steps = self.config.algo.num_steps
-        self.batch_size = self.config.algo.batch_size
-        self.gamma_n = self.config.env.gamma ** self.config.algo.multi_step
-        self.start_steps = self.config.algo.start_steps
-        self.update_interval = self.config.algo.update_interval
-        self.target_update_interval = self.config.algo.target_update_interval
-        self.use_per = self.config.algo.use_per
-        self.evaluate_steps = self.config.algo.evaluate_steps
-        self.log_interval = self.config.algo.log_interval
-        self.eval_interval = self.config.algo.eval_interval
-        self.num_parallel_envs = self.config.algo.num_parallel_envs
-        self.target_entropy_ratio = self.config.algo.target_entropy_ratio
-        self.verbose = self.config.basic.verbose
 
     @staticmethod
     def set_seed(seed=1234):
@@ -292,12 +295,15 @@ class BaseAgent(ABC):
             torch.set_default_dtype(torch.float32)
 
     @abstractmethod
-    def normalize_state(self):
+    def normalize_phase(self):
         pass
 
     def run(self):
-        if hasattr(self, 'normalize_state'):
-            self.normalize_state()
+        if hasattr(self, 'normalize_phase') and \
+            (self.config.algo.normalize_state or \
+            self.config.algo.zscore_reward):
+
+            self.normalize_phase()
 
         self.train()
 
@@ -334,35 +340,61 @@ class BaseAgent(ABC):
         pass
 
     def _normalize_reward(self, reward):
+
         if self.config.algo.clip_reward:
             reward = np.clip(reward, -1.0, 1.0)
         if self.config.algo.zscore_reward:
-            reward = np.array([self.reward_filter(r) for r in reward])
+            if self.num_parallel_envs > 1:
+                reward = np.array([self.reward_filter(r) for r in reward])
+            else:
+                reward = self.reward_filter(reward)
+
         return reward
 
     def train(self):
 
         state = self.env_train.reset()
-        state = self.state_scaler.transform(state)
+        if self.config.algo.normalize_state:
+            state = self.state_scaler.transform(state)
         episode_return = 0
         episode_steps = 0
 
         for steps in trange(self.num_steps, desc='Train'):
 
+            # Environment interaction
             action = self.explore(state)
             next_state, reward, done, info = self.env_train.step(action)
 
+            # Count steps
             episode_return += np.sum(reward)
             episode_steps += self.num_parallel_envs
             self.steps += self.num_parallel_envs
 
+            # Normalization for reward and state
             reward = self._normalize_reward(reward)
-            next_state = self.state_scaler.transform(next_state)
-            for i in range(self.num_parallel_envs):
-                self.memory.append(state[i], action[i], reward[i], next_state[i], done[i])
-            state = next_state
+            if self.config.algo.normalize_state:
+                next_state = self.state_scaler.transform(next_state[None, ...])
 
-            if done[0]:
+            # Accumulate memory
+            if self.num_parallel_envs > 1:
+                for i in range(self.num_parallel_envs):
+                    self.memory.append(state[i], action[i], reward[i], next_state[i], done[i])
+            else:
+                self.memory.append(state, action, reward, next_state, done)
+
+            # Next state
+            if self.num_parallel_envs == 1 and done:
+                state = self.env_train.reset()
+            else:
+                state = next_state
+
+            # Episodic statistics
+            if (self.num_parallel_envs == 1 and done) or \
+                (self.num_parallel_envs > 1 and done[0]):
+
+                # For environments with asynchronous termination, 
+                #   this statistics is not accurate.
+
                 self.episodes += self.num_parallel_envs
                 episode_return /= self.num_parallel_envs
                 episode_steps /= self.num_parallel_envs
@@ -502,14 +534,14 @@ class SacdAgent(BaseAgent):
             hidden=self.config.algo.hidden_size,
             encoder=self.config.env.encoder).to(device=self.device)
         self.online_critic = TwinnedQNetwork(
-            self.env_train_base.observation_space.shape[0], 
-            self.env_train_base.action_space.n,
+            self.env_train.observation_space.shape[0], 
+            self.env_train.action_space.n,
             use_dueling=self.config.algo.use_dueling,
             hidden=self.config.algo.hidden_size,
             encoder=self.config.env.encoder).to(device=self.device)
         self.target_critic = TwinnedQNetwork(
-            self.env_train_base.observation_space.shape[0], 
-            self.env_train_base.action_space.n,
+            self.env_train.observation_space.shape[0], 
+            self.env_train.action_space.n,
             use_dueling=self.config.algo.use_dueling,
             hidden=self.config.algo.hidden_size,
             encoder=self.config.env.encoder).to(device=self.device).eval()
@@ -529,7 +561,7 @@ class SacdAgent(BaseAgent):
 
         # Target entropy is -log(1/|A|) * ratio (= maximum entropy * ratio).
         self.target_entropy = \
-            - np.log(1.0 / self.env_train_base.action_space.n) \
+            - np.log(1.0 / self.env_train.action_space.n) \
             * self.target_entropy_ratio
 
         # We optimize log(alpha), instead of alpha.
@@ -538,23 +570,33 @@ class SacdAgent(BaseAgent):
         self.alpha_optim = Adam([self.log_alpha], 
             lr=self.config.algo.lr)
 
-        self.state_scaler = StandardScaler()
+        self.state_scaler = NDStandardScaler()
         self.reward_filter = ZFilter()
 
-    def normalize_state(self):
+    def normalize_phase(self):
         acc_states = []
+
         self.env_train.reset()
         for _ in trange(self.config.algo.normalization_steps // self.num_parallel_envs, \
-            desc='normalize_state'): 
+            desc='normalize_phase'): 
 
             # random sample action to collect some samples
-            actions = np.random.choice(2, size=self.num_parallel_envs)
-            states, rewards, _, _ = self.env_train.step(actions)
-            for reward in rewards:
-                self.reward_filter.rs.push(reward)
-            acc_states.extend(states)
+            if self.num_parallel_envs == 1:
+                action = np.random.choice(self.env_train.action_space.n)
+                state, reward, done, _ = self.env_train.step(action)
+                self.reward_filter.update(reward)
+                acc_states.append(state)
+                if done:
+                    self.env_train.reset()
+            else:
+                actions = np.random.choice(self.env_train.action_space.n, 
+                    size=self.num_parallel_envs)
+                states, rewards, _, _ = self.env_train.step(actions)
+                for reward in rewards:
+                    self.reward_filter.update(reward)
+                acc_states.extend(states)
         
-        self.state_scaler.fit(np.array(acc_states))
+        self.state_scaler.fit(acc_states)
 
     def _to_tensor(self, tensor, dtype=None, device='cpu'):
         if dtype is None: 
@@ -574,7 +616,11 @@ class SacdAgent(BaseAgent):
 
         with torch.no_grad():
             actions, _ = self.policy.sample(states)
-        return actions.flatten()
+
+        if self.num_parallel_envs == 1:
+            return actions.flatten()[0]
+        else:
+            return actions.flatten()
 
     def exploit(self, state):
         # Act without randomness.

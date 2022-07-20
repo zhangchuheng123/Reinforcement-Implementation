@@ -28,7 +28,7 @@ class NoopResetEnv(gym.Wrapper):
         if self.override_num_noops is not None:
             noops = self.override_num_noops
         else:
-            noops = self.unwrapped.np_random.randint(1, self.noop_max + 1)
+            noops = self.unwrapped.np_random.integers(1, self.noop_max + 1)
         assert noops > 0
         obs = None
         for _ in range(noops):
@@ -315,3 +315,54 @@ def wrap_monitor(env, log_dir):
     env = wrappers.Monitor(
         env, log_dir, video_callable=lambda x: True)
     return env
+
+
+class VectorEnv(object):
+    def __init__(self, n, env_func, parallel_init=False, **kwargs):
+
+        print('[{}] Wait for initializing environments'.format(str(datetime.datetime.now())))
+        self.pool = Pool(NUM_CORES)
+        if parallel_init:
+            init_func = lambda x: env_func(**kwargs)
+            self.envs = self.pool.map(init_func, list(range(n)))
+        else:
+            self.envs = tuple(env_func(**kwargs) for _ in range(n))
+        self.return_state_format = 'list'
+        print('[{}] Finish initializing environments'.format(str(datetime.datetime.now())))
+
+    def set_return_state_format(self, fmt):
+        self.return_state_format = fmt
+
+    def seed(self, seeds):
+
+        seed_func = lambda args: args[0].seed(args[1])
+        self.pool.map(seed_func, list(zip(self.envs, seeds)))
+
+    def reset(self):
+
+        reset_func = lambda env: env.reset()
+        states = self.pool.map(reset_func, self.envs)
+        if self.return_state_format == 'array':
+            states = np.array(states)
+        return states
+
+    def step(self, actions):
+
+        def step_func(args):
+            env, a = args
+            observation, reward, done, info = env.step(a)
+            if done:
+                observation = env.reset()
+            return observation, reward, done, info
+
+        res = self.pool.map(step_func, list(zip(self.envs, actions)))
+        states, rewards, dones, infos = list(zip(*res))
+        if self.return_state_format == 'array':
+            states = np.array(states)
+        return states, rewards, dones, infos
+
+    def __del__(self):
+        self.close()
+
+    def close(self):
+        self.pool.close()

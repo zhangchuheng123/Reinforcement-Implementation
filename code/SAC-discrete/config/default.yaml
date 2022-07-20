@@ -5,10 +5,10 @@ basic:
   verbose: 2
 
 algo:
-  num_steps: 5000000
+  num_steps: 5000000    # 5M
   batch_size: 64
   lr: 0.0003
-  memory_size: 300000
+  memory_size: 300000   # 300k
   multi_step: 1
   target_entropy_ratio: 0.98
   target_update_interval: 8000
@@ -17,15 +17,15 @@ algo:
   start_steps: 5000
   normalization_steps: 2000
   lamda: 0.97
-  clip_reward: False
-  zscore_reward: True
+  clip_reward: True
+  zscore_reward: False
   normalize_state: False
   hidden_size: 64
   update_interval: 4
   log_interval: 20
   eval_interval: 10000
   no_term: True
-  num_eval_steps: 6000
+  evaluate_steps: 6000
   gamma: 0.98
 
 env:

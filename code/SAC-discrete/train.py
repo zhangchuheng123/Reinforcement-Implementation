@@ -203,8 +203,8 @@ class BaseAgent(ABC):
         self.config = DefaultMunch.fromDict(config)
 
         # Assertation
-        assert self.config.algo.multi_step == 1, \
-            "Multi step with parallel envs is not implemented"
+        assert self.config.env.num_parallel_envs == 1, \
+            "Parallel environment is not implemented."
 
         # Set up
         self.seed = self.config.basic.seed
